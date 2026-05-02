@@ -1,0 +1,16 @@
+
+# CCS build output
+Debug/
+Release/
+Generated Binaries/
+Compiler Includes/
+
+# Object files
+*.out
+*.map
+*.obj
+*.o
+*.d
+
+# macOS
+.DS_Store
