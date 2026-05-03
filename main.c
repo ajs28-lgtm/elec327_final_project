@@ -1,4 +1,5 @@
 #include <ti/devices/msp/msp.h>
+#include <ti/driverlib/driverlib.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -30,6 +31,12 @@
 #define BUTTON_OCTAVE (1u << 26) // PA26 / BUTTON1
 #define BUTTON_RECORD (1u << 25) // PA25 / BUTTON2
 #define CONTROL_PINS (BUTTON_OCTAVE | BUTTON_RECORD)
+
+// ADC potentiometer input
+#define POT_ADC_MAX 4095u
+#define VOLUME_MIN_PERCENT 5u
+#define VOLUME_MAX_PERCENT 100u
+// Potentiometer is used for buzzer volume control
 
 // Recording settings
 #define MAX_RECORDING_NOTES 64
@@ -111,6 +118,10 @@ void GPIO_Init(void) {
     IOMUX->SECCFG.PINCM[IOMUX_PINCM59] = 0x60081; // PA26 / BUTTON1 / octave
     IOMUX->SECCFG.PINCM[IOMUX_PINCM55] = 0x60081; // PA25 / BUTTON2 / record
 
+    // Configure PA27/POT for analog use
+    // For analog functions, PINCM.PF and PINCM.PC should be 0, 
+    // so do not connect it as a digital GPIO
+    IOMUX->SECCFG.PINCM[IOMUX_PINCM60] = 0x00000000; // PA27 / A0_0
 
     // Set output values to 0 initially
     GPIOA->DOUTCLR31_0 = LED_ALL | BUZZER | SDA_PIN | SCL_PIN;
@@ -325,17 +336,95 @@ const uint32_t led_pins[8] = {
     LED1, LED2, LED3, LED4, LED5, LED6, LED7, LED8
 };
 
+uint8_t ReadVolumePercent(void);
+
 void PlayTone(uint32_t half_period_cycles, uint32_t duration_ms) {
     uint32_t total_cycles = (duration_ms * 32000);
     uint32_t elapsed = 0;
 
+    uint32_t period_cycles = half_period_cycles * 2;
+    uint8_t volume_percent = ReadVolumePercent();
+
+    // Volume is controlled by changing the buzzer duty cycle.
+    // 100% volume keeps the original 50% duty cycle.
+    // Lower volume keeps the same pitch but makes the HIGH time shorter.
+    uint32_t high_cycles = (half_period_cycles * volume_percent) / 100;
+    uint32_t low_cycles = period_cycles - high_cycles;
+
+    if (high_cycles < 100) {
+        high_cycles = 100;
+        low_cycles = period_cycles - high_cycles;
+    }
+
     while (elapsed < total_cycles) {
         GPIOA->DOUTSET31_0 = BUZZER;
-        delay_cycles(half_period_cycles);
+        delay_cycles(high_cycles);
         GPIOA->DOUTCLR31_0 = BUZZER;
-        delay_cycles(half_period_cycles);
-        elapsed += (half_period_cycles * 2);
+        delay_cycles(low_cycles);
+        elapsed += period_cycles;
     }
+}
+
+// ============================================================================
+// ADC POTENTIOMETER / VOLUME CONTROL
+// ============================================================================
+
+void ADC_Init(void) {
+    DL_ADC12_enablePower(ADC0);
+    delay_cycles(16);
+    DL_ADC12_reset(ADC0);
+    delay_cycles(16);
+
+    DL_ADC12_ClockConfig adcClockConfig = {
+        .clockSel = DL_ADC12_CLOCK_SYSOSC,
+        .divideRatio = DL_ADC12_CLOCK_DIVIDE_8,
+        .freqRange = DL_ADC12_CLOCK_FREQ_RANGE_24_TO_32
+    };
+
+    DL_ADC12_setClockConfig(ADC0, &adcClockConfig);
+    DL_ADC12_initSingleSample(ADC0,
+                              DL_ADC12_REPEAT_MODE_DISABLED,
+                              DL_ADC12_SAMPLING_SOURCE_AUTO,
+                              DL_ADC12_TRIG_SRC_SOFTWARE,
+                              DL_ADC12_SAMP_CONV_RES_12_BIT,
+                              DL_ADC12_SAMP_CONV_DATA_FORMAT_UNSIGNED);
+    DL_ADC12_setSampleTime0(ADC0, 32);
+    DL_ADC12_configConversionMem(ADC0,
+                                 DL_ADC12_MEM_IDX_0,
+                                 DL_ADC12_INPUT_CHAN_0, // PA27 / A0_0
+                                 DL_ADC12_REFERENCE_VOLTAGE_VDDA,
+                                 DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0,
+                                 DL_ADC12_AVERAGING_MODE_DISABLED,
+                                 DL_ADC12_BURN_OUT_SOURCE_DISABLED,
+                                 DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
+                                 DL_ADC12_WINDOWS_COMP_MODE_DISABLED);
+    DL_ADC12_enableConversions(ADC0);
+}
+
+uint16_t ADC_ReadPotRaw(void) {
+    DL_ADC12_startConversion(ADC0);
+    while (DL_ADC12_isConversionStarted(ADC0)) {
+        // Wait for single conversion to finish
+    }
+
+    uint16_t value = DL_ADC12_getMemResult(ADC0, DL_ADC12_MEM_IDX_0);
+
+    // Re-enable conversions for the next software-triggered sample
+    DL_ADC12_enableConversions(ADC0);
+    return value;
+}
+
+uint8_t ReadVolumePercent(void) {
+    uint16_t raw = ADC_ReadPotRaw();
+
+    uint32_t volume = VOLUME_MIN_PERCENT +
+        (((uint32_t) raw * (VOLUME_MAX_PERCENT - VOLUME_MIN_PERCENT)) / POT_ADC_MAX);
+
+    if (volume > VOLUME_MAX_PERCENT) {
+        volume = VOLUME_MAX_PERCENT;
+    }
+
+    return (uint8_t) volume;
 }
 
 // ============================================================================
@@ -470,6 +559,8 @@ int main(void) {
         delay_ms(200);
     }
 
+    ADC_Init();
+
     uint16_t touch_status = 0;
     uint16_t previous_touch_status = 0;
 
@@ -554,3 +645,4 @@ void PlayRecordedSong(void) {
         }
     }
 }
+
