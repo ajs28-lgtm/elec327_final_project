@@ -1,5 +1,6 @@
 #include <ti/devices/msp/msp.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 // ============================================================================
 // HARDWARE DEFINITIONS & PIN MAPPING
@@ -24,6 +25,22 @@
 #define SCL_PIN (1u << 1)  // PA1
 #define IRQ_PIN (1u << 13) // PA13
 
+// Buttons are wired to GND
+// They are active-low and need internal pull-ups
+#define BUTTON_OCTAVE (1u << 26) // PA26 / BUTTON1
+#define BUTTON_RECORD (1u << 25) // PA25 / BUTTON2
+#define CONTROL_PINS (BUTTON_OCTAVE | BUTTON_RECORD)
+
+// Recording settings
+#define MAX_RECORDING_NOTES 64
+#define RECORDED_NOTE_DURATION_MS 110
+#define PLAYBACK_GAP_MS 8
+
+// Recording button phases
+#define RECORD_PHASE_READY 0
+#define RECORD_PHASE_RECORDING 1
+#define RECORD_PHASE_READY_TO_PLAY 2
+
 // MPR121 Definitions
 #define MPR121_ADDR 0x5A
 #define MPR_TOUCH_STATUS_L 0x00
@@ -35,7 +52,8 @@
 // DELAY FUNCTIONS
 // ============================================================================
 
-// Simple cycle delay. At 32MHz, 32000 cycles is roughly 1ms.
+// Simple cycle delay
+// At 32MHz, 32000 cycles is roughly 1ms
 void delay_cycles(uint32_t cycles) {
     while (cycles--) {
         __asm("nop");
@@ -87,6 +105,13 @@ void GPIO_Init(void) {
     IOMUX->SECCFG.PINCM[IOMUX_PINCM1] = 0x40081; // PA0 SDA
     IOMUX->SECCFG.PINCM[IOMUX_PINCM2] = 0x40081; // PA1 SCL
 
+    // Configure user buttons as GPIO inputs with pull-ups
+    // 0x60081 = pull-up + input enable + peripheral connected + GPIO function
+    // PA26 is PINCM59 and PA25 is PINCM55 on MSPM0G3507
+    IOMUX->SECCFG.PINCM[IOMUX_PINCM59] = 0x60081; // PA26 / BUTTON1 / octave
+    IOMUX->SECCFG.PINCM[IOMUX_PINCM55] = 0x60081; // PA25 / BUTTON2 / record
+
+
     // Set output values to 0 initially
     GPIOA->DOUTCLR31_0 = LED_ALL | BUZZER | SDA_PIN | SCL_PIN;
 
@@ -94,7 +119,7 @@ void GPIO_Init(void) {
     GPIOA->DOESET31_0 = LED_ALL | BUZZER;
 
     // Disable output drivers for Inputs and Open-Drain I2C
-    GPIOA->DOECLR31_0 = IRQ_PIN | SDA_PIN | SCL_PIN;
+    GPIOA->DOECLR31_0 = IRQ_PIN | SDA_PIN | SCL_PIN | CONTROL_PINS;
 }
 
 // ============================================================================
@@ -314,6 +339,101 @@ void PlayTone(uint32_t half_period_cycles, uint32_t duration_ms) {
 }
 
 // ============================================================================
+// BUTTONS, OCTAVE, AND RECORDING STATE
+// ============================================================================
+
+typedef struct {
+    uint8_t key_index;    // 0 to 7
+    int8_t octave_offset; // -1, 0, or +1
+} RecordedNote;
+
+static RecordedNote recording[MAX_RECORDING_NOTES];
+static uint8_t recording_count = 0;
+static uint8_t recording_enabled = 0;
+static uint8_t playback_requested = 0;
+static uint8_t record_phase = RECORD_PHASE_READY;
+static int8_t octave_offset = 0;
+static uint8_t prev_octave_pressed = 0;
+static uint8_t prev_record_pressed = 0;
+
+static uint8_t ButtonPressed(uint32_t button_pin) {
+    return (GPIOA->DIN31_0 & button_pin) ? 0 : 1; // active-low
+}
+
+static void FlashAllLEDs(uint8_t times, uint32_t delay_time_ms) {
+    for (uint8_t i = 0; i < times; i++) {
+        GPIOA->DOUTSET31_0 = LED_ALL;
+        delay_ms(delay_time_ms);
+        GPIOA->DOUTCLR31_0 = LED_ALL;
+        delay_ms(delay_time_ms);
+    }
+}
+
+static void HandleButtons(void) {
+    uint8_t octave_pressed = ButtonPressed(BUTTON_OCTAVE);
+    uint8_t record_pressed = ButtonPressed(BUTTON_RECORD);
+
+    // BUTTON1: cycle octave through 0, +1, -1, then back to 0
+    if (octave_pressed && !prev_octave_pressed) {
+        if (octave_offset == 0) {
+            octave_offset = 1;
+        } else if (octave_offset == 1) {
+            octave_offset = -1;
+        } else {
+            octave_offset = 0;
+        }
+        FlashAllLEDs((uint8_t)(octave_offset + 2), 50);
+        delay_ms(40); // debounce
+    }
+
+    // BUTTON2:
+    // Phase 1: start a fresh recording and clear the old recording
+    // Phase 2: stop recording without playing back immediately
+    // Phase 3: play the saved recording
+    // Phase 4: next press starts a new recording again
+    if (record_pressed && !prev_record_pressed) {
+        if (record_phase == RECORD_PHASE_READY) {
+            playback_requested = 0;
+            recording_enabled = 1;
+            recording_count = 0;
+            record_phase = RECORD_PHASE_RECORDING;
+            FlashAllLEDs(2, 30); // recording started
+        } else if (record_phase == RECORD_PHASE_RECORDING) {
+            recording_enabled = 0;
+            record_phase = RECORD_PHASE_READY_TO_PLAY;
+            FlashAllLEDs(3, 30); // recording stopped
+        } else if (record_phase == RECORD_PHASE_READY_TO_PLAY) {
+            playback_requested = 1;
+            record_phase = RECORD_PHASE_READY;
+            FlashAllLEDs(1, 30); // playback requested
+        }
+        delay_ms(50); // debounce
+    }
+
+    prev_octave_pressed = octave_pressed;
+    prev_record_pressed = record_pressed;
+}
+
+static uint32_t ApplyOctave(uint32_t base_half_period_cycles, int8_t octave) {
+    if (octave > 0) {
+        return base_half_period_cycles >> 1; // one octave up = 2x frequency
+    } else if (octave < 0) {
+        return base_half_period_cycles << 1; // one octave down = 1/2 frequency
+    }
+    return base_half_period_cycles;
+}
+
+static void RecordKey(uint8_t key_index) {
+    if (recording_enabled && recording_count < MAX_RECORDING_NOTES) {
+        recording[recording_count].key_index = key_index;
+        recording[recording_count].octave_offset = octave_offset;
+        recording_count++;
+    }
+}
+
+void PlayRecordedSong(void);
+
+// ============================================================================
 // MAIN APPLICATION
 // ============================================================================
 
@@ -329,7 +449,8 @@ int main(void) {
 
     // Initialize MPR121
     if (!MPR121_Init()) {
-        // Diagnostic: Init Failed. Blink LED1 and LED8 alternately.
+        // Diagnostic: Init Failed
+        // Blink LED1 and LED8 alternately
         while (1) {
             GPIOA->DOUTSET31_0 = LED1;
             GPIOA->DOUTCLR31_0 = LED8;
@@ -340,7 +461,8 @@ int main(void) {
         }
     }
 
-    // Diagnostic: Init Success. Blink all LEDs twice.
+    // Diagnostic: Init Success
+    // Blink all LEDs twice
     for (int i = 0; i < 2; i++) {
         GPIOA->DOUTSET31_0 = LED_ALL;
         delay_ms(200);
@@ -349,11 +471,19 @@ int main(void) {
     }
 
     uint16_t touch_status = 0;
+    uint16_t previous_touch_status = 0;
 
     while (1) {
-        // We will read the touch status CONTINUOUSLY instead of relying solely on the IRQ pin.
-        // This eliminates the IRQ pin as a potential point of failure.
-        // If the I2C read succeeds, we process the touch status.
+        HandleButtons();
+        
+        if (playback_requested) {
+            playback_requested = 0;
+            PlayRecordedSong();
+        }
+
+        // We will read the touch status CONTINUOUSLY instead of relying solely on the IRQ pin
+        // This eliminates the IRQ pin as a potential point of failure
+        // If the I2C read succeeds, we process the touch status
         
         if (MPR121_ReadTouchStatus(&touch_status)) {
             
@@ -364,31 +494,63 @@ int main(void) {
             uint8_t any_key_touched = 0;
             
             for (int i = 0; i < 8; i++) {
-                if (touch_status & (1u << (i + 4))) {
+                uint16_t key_mask = (1u << (i + 4));
+
+                if (touch_status & key_mask) {
                     // Key is touched!
                     any_key_touched = 1;
                     
+                    // Only record the key once when it first becomes touched.
+                    if (!(previous_touch_status & key_mask)) {
+                        RecordKey((uint8_t)i);
+                    }
+
                     // 1. Turn on corresponding LED
                     GPIOA->DOUTSET31_0 = led_pins[i];
                     
                     // 2. Play corresponding note for a short duration
-                    PlayTone(note_cycles[i], 100); 
+                    PlayTone(ApplyOctave(note_cycles[i], octave_offset), 100); 
                 }
             }
             
+            previous_touch_status = touch_status;
+
             // If no keys are touched, we just wait a bit before polling again
             if (!any_key_touched) {
                 delay_ms(20);
             }
             
         } else {
-            // Diagnostic: I2C Read Failed during loop.
-            // Blink LED1 and LED2 rapidly to indicate read error.
+            // Diagnostic: I2C Read Failed during loop
+            // Blink LED1 and LED2 rapidly to indicate read error
             GPIOA->DOUTCLR31_0 = LED_ALL;
             GPIOA->DOUTSET31_0 = LED1 | LED2;
             delay_ms(100);
             GPIOA->DOUTCLR31_0 = LED1 | LED2;
             delay_ms(100);
+        }
+    }
+}
+
+
+void PlayRecordedSong(void) {
+    GPIOA->DOUTCLR31_0 = LED_ALL;
+
+    for (uint8_t i = 0; i < recording_count; i++) {
+        uint8_t key_index = recording[i].key_index;
+        int8_t recorded_octave = recording[i].octave_offset;
+
+        uint32_t playback_duration = RECORDED_NOTE_DURATION_MS;
+        uint32_t playback_gap = PLAYBACK_GAP_MS;
+
+        if (key_index < 8) {
+            GPIOA->DOUTSET31_0 = led_pins[key_index];
+
+            PlayTone(ApplyOctave(note_cycles[key_index], recorded_octave),
+                     playback_duration);
+
+            GPIOA->DOUTCLR31_0 = led_pins[key_index];
+            delay_ms(playback_gap);
         }
     }
 }
