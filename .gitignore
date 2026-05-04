@@ -1,3 +1,4 @@
+
 # KiCad backup/cache files
 *-backups/
 fp-info-cache
@@ -11,3 +12,21 @@ fp-info-cache
 
 # macOS files
 .DS_Store
+
+
+# CCS build output
+Debug/
+Release/
+Generated Binaries/
+Compiler Includes/
+
+# Object files
+*.out
+*.map
+*.obj
+*.o
+*.d
+
+# macOS
+.DS_Store
+
