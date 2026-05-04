@@ -103,11 +103,11 @@ void GPIO_Init(void) {
     IOMUX->SECCFG.PINCM[IOMUX_PINCM47] = 0x81; // PA22
 
     // Configure PINCM for MPR121 IRQ (Input)
-    // CRITICAL FIX: Must set INENA (bit 18) to enable the input buffer!
+    // Must set INENA (bit 18) to enable the input buffer!
     // 0x40081 = INENA (bit 18) + PC (bit 7) + GPIO function (bit 0)
     IOMUX->SECCFG.PINCM[IOMUX_PINCM35] = 0x40081; // PA13
 
-    // Configure PINCM for Soft I2C (Open-Drain style)
+    // Configure PINCM for Soft I2C (Open-Drain)
     // Also need INENA (bit 18) so we can read SDA/SCL state
     IOMUX->SECCFG.PINCM[IOMUX_PINCM1] = 0x40081; // PA0 SDA
     IOMUX->SECCFG.PINCM[IOMUX_PINCM2] = 0x40081; // PA1 SCL
@@ -142,27 +142,29 @@ static void i2c_delay(void) {
 }
 
 static void SDA_Release(void) {
-    GPIOA->DOECLR31_0 = SDA_PIN;
+    GPIOA->DOECLR31_0 = SDA_PIN; // Release SDA line (set as input - ext. drive high)
 }
 
 static void SDA_Low(void) {
-    GPIOA->DOUTCLR31_0 = SDA_PIN;
+    GPIOA->DOUTCLR31_0 = SDA_PIN; // Drive SDA line low (set as output and write 0)
     GPIOA->DOESET31_0 = SDA_PIN;
 }
 
-static void SCL_Release(void) {
+static void SCL_Release(void) { // Release SCL line (set as input - ext. drive high)
     GPIOA->DOECLR31_0 = SCL_PIN;
 }
 
 static void SCL_Low(void) {
-    GPIOA->DOUTCLR31_0 = SCL_PIN;
+    GPIOA->DOUTCLR31_0 = SCL_PIN; // Drive SCL line low
     GPIOA->DOESET31_0 = SCL_PIN;
 }
 
 static uint8_t SDA_Read(void) {
-    return (GPIOA->DIN31_0 & SDA_PIN) ? 1 : 0;
+    return (GPIOA->DIN31_0 & SDA_PIN) ? 1 : 0; // Read current state of SDA line
 }
 
+// Generate I2C START condition
+// SDA goes LOW while SCL is HIGH
 static void I2C_Start(void) {
     SDA_Release();
     SCL_Release();
@@ -173,6 +175,8 @@ static void I2C_Start(void) {
     i2c_delay();
 }
 
+// Generate I2C STOP condition
+// SDA goes HIGH while SCL is HIGH
 static void I2C_Stop(void) {
     SDA_Low();
     i2c_delay();
@@ -182,12 +186,14 @@ static void I2C_Stop(void) {
     i2c_delay();
 }
 
+// Write one byte over I2C (MSB first)
+// Returns 1 if ACK received, 0 if NACK
 static uint8_t I2C_WriteByte(uint8_t data) {
     for (int i = 0; i < 8; i++) {
         if (data & 0x80) {
-            SDA_Release();
+            SDA_Release(); // send 1
         } else {
-            SDA_Low();
+            SDA_Low(); // send 0
         }
         i2c_delay();
         SCL_Release();
@@ -209,6 +215,7 @@ static uint8_t I2C_WriteByte(uint8_t data) {
     return ack;
 }
 
+// Read one byte from I2C
 static uint8_t I2C_ReadByte(uint8_t ack) {
     uint8_t data = 0;
     SDA_Release();
@@ -239,6 +246,11 @@ static uint8_t I2C_ReadByte(uint8_t ack) {
     return data;
 }
 
+// Write a value to a device register
+// dev = 7-bit device address
+// reg = register address
+// val = data to write
+// Returns 1 on success, 0 on failure 
 uint8_t SoftI2C_WriteReg(uint8_t dev, uint8_t reg, uint8_t val) {
     I2C_Start();
     if (!I2C_WriteByte((dev << 1) | 0)) return 0; // NACK
@@ -248,6 +260,11 @@ uint8_t SoftI2C_WriteReg(uint8_t dev, uint8_t reg, uint8_t val) {
     return 1; // Success
 }
 
+// Read a value from a device register
+// dev = 7-bit device address
+// reg = register address
+// val = pointer to store result
+// Returns 1 on success, 0 on failure
 uint8_t SoftI2C_ReadReg(uint8_t dev, uint8_t reg, uint8_t *val) {
     I2C_Start();
     if (!I2C_WriteByte((dev << 1) | 0)) return 0;
