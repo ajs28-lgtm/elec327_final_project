@@ -1,0 +1,13 @@
+# KiCad backup/cache files
+*-backups/
+fp-info-cache
+*.bak
+*.kicad_pcb-bak
+
+# KiCad generated/export files
+*.net
+*.xml
+*.csv
+
+# macOS files
+.DS_Store
