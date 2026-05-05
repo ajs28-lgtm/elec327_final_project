@@ -1,38 +1,448 @@
-<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-  <meta http-equiv="Content-Style-Type" content="text/css">
-  <title></title>
-  <meta name="Generator" content="Cocoa HTML Writer">
-  <meta name="CocoaVersion" content="2575.7">
-  <style type="text/css">
-    p.p1 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Helvetica; -webkit-text-stroke: #000000}
-    p.p2 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Helvetica; -webkit-text-stroke: #000000; min-height: 14.0px}
-    span.s1 {font-kerning: none}
-    span.s2 {font: 11.0px Menlo; font-variant-ligatures: no-common-ligatures; color: #000000; -webkit-text-stroke: 0px #000000}
-    span.s3 {font: 12.0px Times; font-kerning: none}
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Capacitive Touch Piano — ELEC 327</title>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --yellow:   #f5c518;
+      --dark:     #1a1a1a;
+      --mid:      #2e2e2e;
+      --light:    #f4f4f0;
+      --muted:    #888;
+      --accent:   #3a7d44;
+      --max-w:    860px;
+      --serif:    'Georgia', 'Times New Roman', serif;
+      --sans:     'Helvetica Neue', Arial, sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--dark);
+      color: var(--light);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    /* ── Header / Hero ── */
+    header {
+      background: var(--dark);
+      border-bottom: 3px solid var(--yellow);
+      padding: 3.5rem 1.5rem 2.5rem;
+      text-align: center;
+    }
+
+    header .tag {
+      display: inline-block;
+      font-size: 0.75rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--yellow);
+      margin-bottom: 0.9rem;
+    }
+
+    header h1 {
+      font-family: var(--serif);
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: #fff;
+      margin-bottom: 1rem;
+    }
+
+    header .meta {
+      font-size: 0.9rem;
+      color: var(--muted);
+      line-height: 1.9;
+    }
+
+    header .meta strong {
+      color: var(--light);
+    }
+
+    /* ── Nav ── */
+    nav {
+      background: var(--mid);
+      border-bottom: 1px solid #3a3a3a;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    nav ul {
+      list-style: none;
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 0;
+      max-width: var(--max-w);
+      margin: 0 auto;
+    }
+
+    nav ul li a {
+      display: block;
+      padding: 0.85rem 1.2rem;
+      font-size: 0.82rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    nav ul li a:hover { color: var(--yellow); }
+
+    /* ── Main Layout ── */
+    main {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 0 1.5rem 4rem;
+    }
+
+    /* ── Sections ── */
+    section {
+      padding: 3.5rem 0 0;
+    }
+
+    section + section {
+      border-top: 1px solid #2e2e2e;
+      margin-top: 3rem;
+    }
+
+    .section-label {
+      font-size: 0.72rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--yellow);
+      margin-bottom: 0.6rem;
+    }
+
+    h2 {
+      font-family: var(--serif);
+      font-size: 1.7rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 1.4rem;
+      line-height: 1.25;
+    }
+
+    p {
+      color: #ccc;
+      margin-bottom: 1.1rem;
+      max-width: 72ch;
+    }
+
+    p:last-child { margin-bottom: 0; }
+
+    /* ── PCB Image ── */
+    .pcb-wrap {
+      margin: 2.5rem 0 0;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid #3a3a3a;
+      background: #111;
+    }
+
+    .pcb-wrap img {
+      width: 100%;
+      display: block;
+    }
+
+    .pcb-caption {
+      padding: 0.65rem 1rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+      border-top: 1px solid #2e2e2e;
+      text-align: center;
+      letter-spacing: 0.03em;
+    }
+
+    /* ── Video ── */
+    .video-block {
+      margin-top: 1.8rem;
+    }
+
+    .video-block + .video-block {
+      margin-top: 2.8rem;
+    }
+
+    .video-label {
+      font-size: 0.75rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.6rem;
+    }
+
+    .video-title {
+      font-family: var(--serif);
+      font-size: 1.15rem;
+      color: #fff;
+      margin-bottom: 1rem;
+    }
+
+    .video-container {
+      position: relative;
+      width: 100%;
+      padding-top: 56.25%;
+      background: #111;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid #3a3a3a;
+    }
+
+    .video-container video {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: #000;
+    }
+
+    /* ── PDF Preview ── */
+    .pdf-card {
+      display: flex;
+      align-items: center;
+      gap: 1.2rem;
+      background: var(--mid);
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      padding: 1.2rem 1.4rem;
+      margin-top: 1.6rem;
+      text-decoration: none;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .pdf-card:hover {
+      border-color: var(--yellow);
+      background: #363636;
+    }
+
+    .pdf-icon {
+      flex-shrink: 0;
+      width: 42px;
+      height: 42px;
+      background: var(--yellow);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      color: #1a1a1a;
+    }
+
+    .pdf-info { flex: 1; min-width: 0; }
+
+    .pdf-name {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pdf-sub {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 0.15rem;
+    }
+
+    .pdf-arrow {
+      flex-shrink: 0;
+      color: var(--muted);
+      font-size: 1.1rem;
+    }
+
+    /* ── Links Section ── */
+    .link-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.9rem;
+      margin-top: 1.6rem;
+    }
+
+    .link-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.65rem 1.2rem;
+      border: 1px solid #3a3a3a;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      color: var(--light);
+      text-decoration: none;
+      background: var(--mid);
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .link-btn:hover {
+      border-color: var(--yellow);
+      color: var(--yellow);
+    }
+
+    .link-btn svg {
+      width: 16px; height: 16px;
+      fill: currentColor;
+      flex-shrink: 0;
+    }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid #2e2e2e;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      header { padding: 2.5rem 1rem 2rem; }
+      nav ul li a { padding: 0.75rem 0.8rem; font-size: 0.75rem; }
+    }
   </style>
 </head>
 <body>
-<p class="p1"><span class="s1">&lt;!DOCTYPE html&gt;</span></p>
-<p class="p1"><span class="s1">&lt;html&gt;</span></p>
-<p class="p1"><span class="s1">&lt;head&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;title&gt;ELEC327 Final Project&lt;/title&gt;</span></p>
-<p class="p1"><span class="s1">&lt;/head&gt;</span></p>
-<p class="p1"><span class="s1">&lt;body&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;h1&gt;Capacitive Piano Final Project&lt;/h1&gt;</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;h2&gt;Short Demo&lt;/h2&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;video width="700" controls&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>&lt;source src="videos/</span><span class="s2">short_demo.mov</span><span class="s1">" type="</span><span class="s3">video/quicktime</span><span class="s1">"&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;/video&gt;</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;h2&gt;Long Demo&lt;/h2&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;video width="700" controls&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>&lt;source src="videos/</span><span class="s2">full_demo_video_cap.mp4</span><span class="s1">" type="video/mp4"&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;/video&gt;</span></p>
-<p class="p1"><span class="s1">&lt;/body&gt;</span></p>
-<p class="p1"><span class="s1">&lt;/html&gt;</span></p>
+
+<!-- ══ HEADER ══ -->
+<header>
+  <div class="tag">ELEC 327 — Digital &amp; Embedded Systems Laboratory &nbsp;·&nbsp; 2026</div>
+  <h1>Capacitive Touch Piano</h1>
+  <div class="meta">
+    <strong>Anjali Sivasothy &amp; Eugenia Sung</strong><br>
+    Rice University &nbsp;·&nbsp; Final Project
+  </div>
+</header>
+
+<!-- ══ NAV ══ -->
+<nav>
+  <ul>
+    <li><a href="#about">About</a></li>
+    <li><a href="#pcb">PCB</a></li>
+    <li><a href="#demos">Demos</a></li>
+    <li><a href="#report">Report</a></li>
+    <li><a href="#slides">Slides</a></li>
+    <li><a href="#code">Code</a></li>
+  </ul>
+</nav>
+
+<!-- ══ MAIN ══ -->
+<main>
+
+  <!-- ABOUT -->
+  <section id="about">
+    <div class="section-label">About the Project</div>
+    <h2>Touch metal. Play music.</h2>
+    <p>
+      The Capacitive Touch Piano is a low-power embedded instrument built on a custom PCB. Touch any of eight copper pads and the board responds immediately: a corresponding LED lights up and a piezo buzzer sounds the note. The system also supports octave shifting across three modes and a record-and-replay function for saving and playing back short melodies.
+    </p>
+    <p>
+      The computational brain is a Texas Instruments MSPM0G3507 microcontroller, which communicates with an NXP MPR121 capacitive touch sensor controller over a software-implemented I²C bus. The MPR121 monitors each pad's capacitance continuously; a touch is registered when the reading crosses a programmable threshold above baseline. The MSPM0 reads that event and drives the LED and buzzer output in real time.
+    </p>
+  </section>
+
+  <!-- PCB IMAGE -->
+  <section id="pcb">
+    <div class="section-label">Hardware</div>
+    <h2>Custom PCB</h2>
+    <div class="pcb-wrap">
+      <img src="final_pcb.webp" alt="Capacitive Touch Piano PCB — Anjali Sivasothy &amp; Eugenia Sung" />
+      <div class="pcb-caption">Capacitive Touch Piano &nbsp;·&nbsp; Anjali Sivasothy &amp; Eugenia Sung</div>
+    </div>
+  </section>
+
+  <!-- DEMOS -->
+  <section id="demos">
+    <div class="section-label">Demos</div>
+    <h2>See It in Action</h2>
+
+    <div class="video-block">
+      <div class="video-label">Short Demo</div>
+      <div class="video-container">
+        <video controls preload="metadata">
+          <source src="videos/short_demo.mov" type="video/mp4" />
+          <source src="videos/short_demo.mov" type="video/quicktime" />
+          Your browser does not support embedded video.
+        </video>
+      </div>
+    </div>
+
+    <div class="video-block">
+      <div class="video-label">Full Presentation</div>
+      <div class="video-container">
+        <video controls preload="metadata">
+          <source src="videos/full_demo_video_cap.mp4" type="video/mp4" />
+          Your browser does not support embedded video.
+        </video>
+      </div>
+    </div>
+  </section>
+
+  <!-- REPORT -->
+  <section id="report">
+    <div class="section-label">Written Report</div>
+    <h2>Final Project Report</h2>
+    <p>
+      The report covers the system concept, hardware architecture, I²C implementation, tone generation, and pedagogical content on the MPR121 sensor and ADC-based volume control.
+    </p>
+    <a class="pdf-card" href="docs/ELEC_327__Final_Project_Report.pdf" target="_blank" rel="noopener">
+      <div class="pdf-icon">PDF</div>
+      <div class="pdf-info">
+        <div class="pdf-name">ELEC 327 — Final Project Report</div>
+        <div class="pdf-sub">Capacitive Touch Input System &nbsp;·&nbsp; Sivasothy &amp; Sung &nbsp;·&nbsp; 2026</div>
+      </div>
+      <div class="pdf-arrow">↗</div>
+    </a>
+  </section>
+
+  <!-- SLIDES -->
+  <section id="slides">
+    <div class="section-label">Presentation Slides</div>
+    <h2>Project Slides</h2>
+    <p>
+      The slide deck accompanies the full presentation video and walks through the system features, design decisions, and component-level explanations.
+    </p>
+    <a class="pdf-card" href="docs/ELEC327ProjectSlides.pdf" target="_blank" rel="noopener">
+      <div class="pdf-icon">PDF</div>
+      <div class="pdf-info">
+        <div class="pdf-name">ELEC 327 — Project Slides</div>
+        <div class="pdf-sub">Capacitive Touch Piano &nbsp;·&nbsp; Sivasothy &amp; Sung &nbsp;·&nbsp; 2026</div>
+      </div>
+      <div class="pdf-arrow">↗</div>
+    </a>
+  </section>
+
+  <!-- CODE -->
+  <section id="code">
+    <div class="section-label">Source Code &amp; Design Files</div>
+    <h2>GitHub Repository</h2>
+    <p>
+      The repository contains the full firmware, KiCad PCB design files, and supporting documentation.
+    </p>
+    <div class="link-row">
+      <a class="link-btn" href="https://github.com/ajs28-lgtm/elec327_final_project" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"/>
+        </svg>
+        ajs28-lgtm / elec327_final_project
+      </a>
+    </div>
+  </section>
+
+</main>
+
+<!-- ══ FOOTER ══ -->
+<footer>
+  ELEC 327 — Digital &amp; Embedded Systems Laboratory &nbsp;·&nbsp; Anjali Sivasothy &amp; Eugenia Sung &nbsp;·&nbsp; 2026
+</footer>
+
 </body>
 </html>
