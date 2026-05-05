@@ -33,6 +33,8 @@
 #define CONTROL_PINS (BUTTON_OCTAVE | BUTTON_RECORD)
 
 // ADC potentiometer input
+// POT_ADC_MAX is the largest 12-bit ADC reading from PA27
+// Volume is mapped from the raw ADC value into a 5% to 100% range
 #define POT_ADC_MAX 4095u
 #define VOLUME_MIN_PERCENT 5u
 #define VOLUME_MAX_PERCENT 100u
@@ -387,6 +389,7 @@ void PlayTone(uint32_t half_period_cycles, uint32_t duration_ms) {
 // ============================================================================
 
 void ADC_Init(void) {
+    // Enable and reset ADC0 before configuring the potentiometer input
     DL_ADC12_enablePower(ADC0);
     delay_cycles(16);
     DL_ADC12_reset(ADC0);
@@ -399,6 +402,8 @@ void ADC_Init(void) {
     };
 
     DL_ADC12_setClockConfig(ADC0, &adcClockConfig);
+
+    // Use single-sample mode because we only need one updated pot reading at a time
     DL_ADC12_initSingleSample(ADC0,
                               DL_ADC12_REPEAT_MODE_DISABLED,
                               DL_ADC12_SAMPLING_SOURCE_AUTO,
@@ -406,6 +411,8 @@ void ADC_Init(void) {
                               DL_ADC12_SAMP_CONV_RES_12_BIT,
                               DL_ADC12_SAMP_CONV_DATA_FORMAT_UNSIGNED);
     DL_ADC12_setSampleTime0(ADC0, 32);
+
+    // Store the PA27 potentiometer reading in ADC memory index 0
     DL_ADC12_configConversionMem(ADC0,
                                  DL_ADC12_MEM_IDX_0,
                                  DL_ADC12_INPUT_CHAN_0, // PA27 / A0_0
@@ -419,11 +426,13 @@ void ADC_Init(void) {
 }
 
 uint16_t ADC_ReadPotRaw(void) {
+    // Start one software-triggered ADC conversion from the potentiometer
     DL_ADC12_startConversion(ADC0);
     while (DL_ADC12_isConversionStarted(ADC0)) {
         // Wait for single conversion to finish
     }
 
+    // Read the raw 12-bit potentiometer value from memory index 0
     uint16_t value = DL_ADC12_getMemResult(ADC0, DL_ADC12_MEM_IDX_0);
 
     // Re-enable conversions for the next software-triggered sample
@@ -432,11 +441,15 @@ uint16_t ADC_ReadPotRaw(void) {
 }
 
 uint8_t ReadVolumePercent(void) {
+    // Get the current raw potentiometer position from the ADC
     uint16_t raw = ADC_ReadPotRaw();
 
+    // Convert 0 to 4095 into the selected volume range
+    // Minimum volume is kept above 0 so the buzzer does not fully disappear
     uint32_t volume = VOLUME_MIN_PERCENT +
         (((uint32_t) raw * (VOLUME_MAX_PERCENT - VOLUME_MIN_PERCENT)) / POT_ADC_MAX);
 
+    // Clamp the result in case the math ever goes slightly above the maximum
     if (volume > VOLUME_MAX_PERCENT) {
         volume = VOLUME_MAX_PERCENT;
     }
@@ -463,6 +476,7 @@ static uint8_t prev_octave_pressed = 0;
 static uint8_t prev_record_pressed = 0;
 
 static uint8_t ButtonPressed(uint32_t button_pin) {
+    // Buttons are active-low, so 0V means pressed and logic high means released
     return (GPIOA->DIN31_0 & button_pin) ? 0 : 1; // active-low
 }
 
@@ -476,11 +490,13 @@ static void FlashAllLEDs(uint8_t times, uint32_t delay_time_ms) {
 }
 
 static void HandleButtons(void) {
+    // Read the current state of both physical buttons
     uint8_t octave_pressed = ButtonPressed(BUTTON_OCTAVE);
     uint8_t record_pressed = ButtonPressed(BUTTON_RECORD);
 
     // BUTTON1: cycle octave through 0, +1, -1, then back to 0
-    if (octave_pressed && !prev_octave_pressed) {
+    // The !prev_octave_pressed check makes the octave change happen once per press
+    // This prevents the octave from changing repeatedly while the button is held down    if (octave_pressed && !prev_octave_pressed) {
         if (octave_offset == 0) {
             octave_offset = 1;
         } else if (octave_offset == 1) {
@@ -488,27 +504,37 @@ static void HandleButtons(void) {
         } else {
             octave_offset = 0;
         }
+        // LED flashes indicate the selected octave mode
+        // octave_offset = -1 flashes once, 0 flashes twice, +1 flashes three times
         FlashAllLEDs((uint8_t)(octave_offset + 2), 50);
         delay_ms(40); // debounce
     }
 
     // BUTTON2:
+    // The record button uses a state machine so one button can control recording and playback
     // Phase 1: start a fresh recording and clear the old recording
     // Phase 2: stop recording without playing back immediately
     // Phase 3: play the saved recording
     // Phase 4: next press starts a new recording again
+    // The !prev_record_pressed check makes the phase change happen once per press
     if (record_pressed && !prev_record_pressed) {
         if (record_phase == RECORD_PHASE_READY) {
+            // Start recording from the beginning
+            // Clear the previous saved notes before adding new notes
             playback_requested = 0;
             recording_enabled = 1;
             recording_count = 0;
             record_phase = RECORD_PHASE_RECORDING;
             FlashAllLEDs(2, 30); // recording started
         } else if (record_phase == RECORD_PHASE_RECORDING) {
+            // Stop saving new key presses
+            // The saved recording stays in the recording[] array
             recording_enabled = 0;
             record_phase = RECORD_PHASE_READY_TO_PLAY;
             FlashAllLEDs(3, 30); // recording stopped
         } else if (record_phase == RECORD_PHASE_READY_TO_PLAY) {
+            // Request playback in the main loop instead of playing inside the button handler
+            // After playback is requested, the next record press will start a new recording
             playback_requested = 1;
             record_phase = RECORD_PHASE_READY;
             FlashAllLEDs(1, 30); // playback requested
@@ -516,11 +542,13 @@ static void HandleButtons(void) {
         delay_ms(50); // debounce
     }
 
+    // Save current button states so the next loop can detect a new press
     prev_octave_pressed = octave_pressed;
     prev_record_pressed = record_pressed;
 }
 
 static uint32_t ApplyOctave(uint32_t base_half_period_cycles, int8_t octave) {
+    // Octave is applied by changing the half-period of the square wave
     if (octave > 0) {
         return base_half_period_cycles >> 1; // one octave up = 2x frequency
     } else if (octave < 0) {
@@ -530,7 +558,9 @@ static uint32_t ApplyOctave(uint32_t base_half_period_cycles, int8_t octave) {
 }
 
 static void RecordKey(uint8_t key_index) {
+    // Save a key only when recording mode is active and space is available
     if (recording_enabled && recording_count < MAX_RECORDING_NOTES) {
+        // Store both the key and the current octave so playback matches the original note
         recording[recording_count].key_index = key_index;
         recording[recording_count].octave_offset = octave_offset;
         recording_count++;
@@ -642,8 +672,10 @@ int main(void) {
 
 
 void PlayRecordedSong(void) {
+    // Turn off all LEDs before replaying the saved notes
     GPIOA->DOUTCLR31_0 = LED_ALL;
 
+    // Replay notes in the same order they were recorded
     for (uint8_t i = 0; i < recording_count; i++) {
         uint8_t key_index = recording[i].key_index;
         int8_t recorded_octave = recording[i].octave_offset;
@@ -652,11 +684,14 @@ void PlayRecordedSong(void) {
         uint32_t playback_gap = PLAYBACK_GAP_MS;
 
         if (key_index < 8) {
+            // Turn on the same LED as the recorded key
             GPIOA->DOUTSET31_0 = led_pins[key_index];
 
+            // Play the saved key using the octave value saved during recording
             PlayTone(ApplyOctave(note_cycles[key_index], recorded_octave),
                      playback_duration);
 
+            // Turn LED off briefly before the next recorded note
             GPIOA->DOUTCLR31_0 = led_pins[key_index];
             delay_ms(playback_gap);
         }
